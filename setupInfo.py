@@ -8,7 +8,14 @@ import sys
 from pathlib import Path
 
 def test_setup():
-    """Test if all required components are available"""
+    """
+    Validate that the environment and required components for the YouTube Monitor are present.
+    
+    Performs these checks in the script's directory: verifies presence of required files (monitor.py, config.py, run_monitor.py), ensures a 'data' directory exists (creates it if missing), checks for an optional '.env' file, attempts to import a list of external Python packages, and attempts to import the local monitor module. This function changes the current working directory to the script's directory, may create the data directory, and temporarily prepends the script directory to sys.path when importing the local module.
+    
+    Returns:
+        bool: `True` if all checks pass and the monitor module imports successfully, `False` otherwise.
+    """
     print("Testing YouTube Monitor setup...")
     
     # Change to script directory
