@@ -1,0 +1,437 @@
+{
+  "name": "YouTube Sync Monitor Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 3 0 * * *"
+            }
+          ]
+        }
+      },
+      "id": "ac5948da-e85d-4d9c-b489-fda17ceeec82",
+      "name": "YouTube Monitor Schedule Trigger 12:03 AM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        736,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 30 1 * * *"
+            }
+          ]
+        }
+      },
+      "id": "26f15c4d-9b73-46d9-80df-1d28da6cab63",
+      "name": "YouTube Monitor Schedule Trigger 1:30 AM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        736,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 0 19 * * *"
+            }
+          ]
+        }
+      },
+      "id": "e42d0b02-cd78-4d4f-a829-ac82172302df",
+      "name": "YouTube Monitor Schedule Trigger 7:00 PM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        736,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/workspace/youtubeSync && python monitor.py"
+      },
+      "id": "2935d9bc-343f-4482-89ea-7eb111853440",
+      "name": "Run YouTube Monitor Script",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        960,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "={{ $json.exitCode === 0 ? 'success' : 'failed' }}"
+            },
+            {
+              "name": "output",
+              "value": "={{ $json.stdout }}"
+            },
+            {
+              "name": "errors",
+              "value": "={{ $json.stderr }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8ce2572d-9f88-4375-8323-a113112537d4",
+      "name": "Format Execution Output",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "parsedOutput",
+              "value": "={{ $json.errors }}"
+            },
+            {
+              "name": "newPlaylistsAdded",
+              "value": "={{ (($json.errors || '').includes('No new playlists detected since last check') ? 0 : parseInt(($json.errors || '').match(/Playlists awaiting sync: (\\d+)/)?.[1]) || 0) }}"
+            },
+            {
+              "name": "playlistsAwaitingSync",
+              "value": "={{ parseInt(($json.errors || '').match(/Playlists awaiting sync: (\\d+)/)?.[1]) || 0 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ba4fc08a-caf4-4e9e-8f42-ec5141b18647",
+      "name": "Parse Results and Count New Playlists",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "={{ $('Parse Results and Count New Playlists').first().json.status }}",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "0fcd821d-2130-446a-9557-644ab1b7983d",
+              "leftValue": "={{ $('Parse Results and Count New Playlists').first().json.status }}",
+              "rightValue": "success",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "64369f2b-7d47-4e57-b25b-fba4dbdd1796",
+      "name": "Check Execution Status",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "={{ 'YouTube Monitor Script executed successfully at ' + $('Parse Results and Count New Playlists').first().json.timestamp + '. New playlists added: ' + ($('Parse Results and Count New Playlists').first().json.newPlaylistsAdded || 0) + ', Playlists awaiting sync: ' + ($('Parse Results and Count New Playlists').first().json.playlistsAwaitingSync || 0) }}"
+            },
+            {
+              "name": "status",
+              "value": "success"
+            },
+            {
+              "name": "emailAddress",
+              "value": "={{ $json.emailAddress || 'admin@example.com' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01a2fc7a-a1ab-4533-9429-708e2b7680a5",
+      "name": "Success Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "message",
+              "value": "={{ 'YouTube Monitor Script failed at ' + $('Parse Results and Count New Playlists').first().json.timestamp + '. Error: ' + ($('Parse Results and Count New Playlists').first().json.errors || 'Unknown error') }}"
+            },
+            {
+              "name": "status",
+              "value": "failed"
+            },
+            {
+              "name": "emailAddress",
+              "value": "={{ $json.emailAddress || 'admin@example.com' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "67fe2e27-d661-43b7-9c0d-e60ba933c9c8",
+      "name": "Error Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "your@email.com",
+        "subject": "YouTube Playlists - {{ $json.status === 'success' ? 'SUCCESS' : 'FAILED' }}",
+        "message": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "5778ec65-f4b4-4cc3-bf32-28fc524309a1",
+      "name": "Email Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        192
+      ],
+      "webhookId": "3155d569-2951-4336-8926-38bc05dd2817",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rS44MqYpwhSCmJRA",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "5cf66586-6282-4acc-a791-92202b1aebc2",
+      "name": "YouTube Monitor Schedule Trigger 8:00 AM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        736,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "0 35 0 * * *"
+            }
+          ]
+        }
+      },
+      "id": "ec7c12be-9b12-4c50-9d48-c8e13242c0fc",
+      "name": "YouTube Monitor Schedule Trigger 12:35 AM",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        736,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "YouTube Monitor Schedule Trigger 12:03 AM": {
+      "main": [
+        [
+          {
+            "node": "Run YouTube Monitor Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Monitor Schedule Trigger 1:30 AM": {
+      "main": [
+        [
+          {
+            "node": "Run YouTube Monitor Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Monitor Schedule Trigger 7:00 PM": {
+      "main": [
+        [
+          {
+            "node": "Run YouTube Monitor Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run YouTube Monitor Script": {
+      "main": [
+        [
+          {
+            "node": "Format Execution Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Execution Output": {
+      "main": [
+        [
+          {
+            "node": "Parse Results and Count New Playlists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Results and Count New Playlists": {
+      "main": [
+        [
+          {
+            "node": "Check Execution Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Execution Status": {
+      "main": [
+        [
+          {
+            "node": "Success Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success Message": {
+      "main": [
+        [
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Message": {
+      "main": [
+        [
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Monitor Schedule Trigger 8:00 AM": {
+      "main": [
+        [
+          {
+            "node": "Run YouTube Monitor Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Monitor Schedule Trigger 12:35 AM": {
+      "main": [
+        [
+          {
+            "node": "Run YouTube Monitor Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "05291278-320b-4a88-9d42-531a303352b9",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
