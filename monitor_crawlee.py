@@ -37,7 +37,15 @@ logger.propagate = False
 
 
 def load_state() -> dict:
-    """Load state from previous runs"""
+    """
+    Load the persisted monitor state from disk; if no state file exists, return a default state.
+    
+    Returns:
+        dict: Mapping with keys:
+            - `latest_playlist_link` (str | None): URL of the most recently seen playlist, or `None`.
+            - `latest_playlist_title` (str | None): Title of the most recently seen playlist, or `None`.
+            - `last_checked` (str | None): ISO-formatted timestamp of the last check, or `None`.
+    """
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
             return json.load(f)
@@ -45,14 +53,29 @@ def load_state() -> dict:
 
 
 def save_state(state: dict) -> None:
-    """Save state for next run"""
+    """
+    Persist the crawler state to the configured STATE_FILE on disk.
+    
+    Parameters:
+        state (dict): Dictionary of state values to persist. Expected keys include
+            `latest_playlist_link` (str or None), `latest_playlist_title` (str or None),
+            and `last_checked` (ISO-8601 timestamp string or None). The dictionary
+            will be written as pretty-printed JSON to the module's STATE_FILE.
+    """
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
 
 def load_scraped_playlists() -> list:
-    """Load previously scraped playlists"""
+    """
+    Load the list of playlists previously saved to disk.
+    
+    Reads the JSON file at SCRAPED_PLAYLISTS_FILE and returns its contents as a list. If the file does not exist, returns an empty list.
+    
+    Returns:
+        list: Previously scraped playlists, or an empty list if no persisted data exists.
+    """
     if SCRAPED_PLAYLISTS_FILE.exists():
         with open(SCRAPED_PLAYLISTS_FILE) as f:
             return json.load(f)
@@ -60,16 +83,24 @@ def load_scraped_playlists() -> list:
 
 
 def save_scraped_playlists(playlists: list) -> None:
-    """Save scraped playlists to file"""
+    """
+    Write the list of scraped playlists to the configured SCRAPED_PLAYLISTS_FILE in JSON format.
+    
+    Parameters:
+        playlists (list): JSON-serializable list of playlist records (typically dicts with keys such as 'link', 'playlist_id', 'title', 'discovered_at', and 'videos').
+    """
     with open(SCRAPED_PLAYLISTS_FILE, "w") as f:
         json.dump(playlists, f, indent=2)
 
 
 async def extract_playlist_title(page) -> Optional[str]:
     """
-    Extract the playlist title from the current page.
-    The page_title attribute contains the full YouTube page title.
-    Extract the playlist name from it.
+    Extracts the playlist title from the YouTube page title.
+    
+    Strips a trailing " - YouTube" suffix when present and returns the cleaned title if its length is greater than 2; returns None if no usable title is found or an error occurs.
+    
+    Returns:
+        title (Optional[str]): The playlist title if available, `None` otherwise.
     """
     try:
         page_title = await page.title()
@@ -84,15 +115,30 @@ async def extract_playlist_title(page) -> Optional[str]:
 
 
 def extract_playlist_id_from_url(url: str) -> Optional[str]:
-    """Extract playlist ID from URL"""
+    """
+    Extract the YouTube playlist ID from a URL's `list` query parameter.
+    
+    Parameters:
+        url (str): The URL to inspect; may be a full YouTube link or a query string containing `list=`.
+    
+    Returns:
+        Optional[str]: The playlist ID string if a `list=` parameter is present, otherwise `None`.
+    """
     match = re.search(r'list=([A-Za-z0-9_-]+)', url)
     return match.group(1) if match else None
 
 
 async def extract_videos_from_playlist(page, playlist_id: str, max_videos: int = 1000) -> list:
     """
-    Extract video IDs from a playlist page using JavaScript evaluation.
-    YouTube loads videos dynamically, so we extract from the JavaScript data.
+    Extracts YouTube video IDs from the currently loaded playlist page.
+    
+    Parameters:
+    	page: Playwright page object positioned on a YouTube playlist.
+    	playlist_id (str): Playlist identifier used for logging.
+    	max_videos (int): Maximum number of video IDs to return.
+    
+    Returns:
+    	list: A list of video ID strings found on the page (up to `max_videos`). Returns an empty list if no videos are found or an error occurs.
     """
     try:
         videos = []
@@ -148,8 +194,17 @@ async def extract_videos_from_playlist(page, playlist_id: str, max_videos: int =
 
 async def scrape_playlists() -> list:
     """
-    Main scraping function using Crawlee.
-    Navigates to the channel playlists page and extracts all playlists.
+    Crawl the channel's playlists page and individual playlist pages to collect playlists and their videos.
+    
+    The function navigates the channel playlists view, discovers playlist links, visits each playlist page, and extracts metadata and video IDs for each unique playlist found. Duplicate playlists (by playlist_id) are ignored.
+    
+    Returns:
+        list: A list of playlist dictionaries. Each dictionary contains:
+            - "link" (str): Full playlist URL.
+            - "playlist_id" (str): Extracted playlist identifier.
+            - "title" (str): Playlist title.
+            - "discovered_at" (str): ISO 8601 timestamp when the playlist was discovered.
+            - "videos" (list): List of video IDs contained in the playlist.
     """
     playlists = []
     seen_ids = set()
@@ -165,7 +220,16 @@ async def scrape_playlists() -> list:
 
     @router.default_handler
     async def request_handler(context) -> None:
-        """Process each crawled page"""
+        """
+        Handle a Crawlee page request and discover or process YouTube playlists.
+        
+        When the request URL contains '/playlists' or a 'list=' query parameter, this handler:
+        - For individual playlist pages (URLs with 'list='): extracts the playlist ID and title, collects video IDs, appends a playlist record to the module-level `playlists` list, and marks the playlist ID in `seen_ids`.
+        - For a channel's playlists listing page (URLs containing '/playlists' and an '@' channel path): loads additional content as needed, extracts playlist links, and enqueues unseen playlist URLs for crawling while marking their IDs in `seen_ids`.
+        
+        Parameters:
+            context: Crawlee request context object exposing `.request` and `.page`, used to read the current URL, interact with the page, and enqueue discovered links.
+        """
         request = context.request
         page = context.page
 
@@ -251,8 +315,14 @@ async def scrape_playlists() -> list:
 
 def filter_playlists(playlists: list, filter_full_album_only: bool = False) -> list:
     """
-    Filter playlists based on criteria.
-    If filter_full_album_only is True, only keep playlists with "Full Album" in title.
+    Return playlists filtered to only those whose title contains "full album" when requested.
+    
+    Parameters:
+        playlists (list): List of playlist dictionaries expected to include a "title" key.
+        filter_full_album_only (bool): If True, only keep playlists whose title contains "full album" (case-insensitive).
+    
+    Returns:
+        list: The filtered list when filtering is enabled; otherwise the original playlists list.
     """
     if not filter_full_album_only:
         return playlists
@@ -263,7 +333,11 @@ def filter_playlists(playlists: list, filter_full_album_only: bool = False) -> l
 
 
 async def main():
-    """Main function"""
+    """
+    Orchestrates scraping of YouTube playlists, detects newly discovered playlists, and updates persisted state and scraped-playlist storage.
+    
+    Loads prior run state, runs the playlist scraper, optionally filters and sorts results by discovery time (newest first), and determines which playlists are new since the last saved latest playlist. On detection of new playlists it appends them to the saved scraped playlists and updates the persisted state (latest link, title, and last_checked). On a first run it saves all discovered playlists and initializes state. When no changes are found it updates only the last_checked timestamp. Handles user interruption and logs unexpected errors.
+    """
     logger.info("=" * 70)
     logger.info("YouTube Revive Monitor - Crawlee Edition")
     logger.info(f"Timestamp: {datetime.now().isoformat()}")

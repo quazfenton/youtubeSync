@@ -79,6 +79,17 @@ HEADERS = {
 }
 
 def _normalize_playlist_title_candidate(candidate):
+    """
+    Normalize and validate a playlist title candidate.
+    
+    Cleans excessive whitespace from the input and returns a trimmed title if it contains meaningful text and does not appear to be a placeholder such as "view full playlist".
+    
+    Parameters:
+    	candidate (str | None): Raw title candidate to normalize.
+    
+    Returns:
+    	str | None: The cleaned title string, or `None` if the candidate is empty, only whitespace, or appears to be a placeholder.
+    """
     if not candidate:
         return None
     cleaned = re.sub(r"\s+", " ", candidate).strip()
@@ -90,6 +101,18 @@ def _normalize_playlist_title_candidate(candidate):
 
 
 def derive_playlist_title_from_link(link, playlist_id=None):
+    """
+    Derives a human-friendly playlist title from a BeautifulSoup link element.
+    
+    Attempts multiple sources (nearby h3/span elements, aria-label, title attribute, and link text) and returns the first cleaned/normalized candidate. If no valid title is found and `playlist_id` is provided, returns the fallback string "Playlist {playlist_id}". Returns `None` when neither a title nor a fallback is available.
+    
+    Parameters:
+        link (bs4.element.Tag | None): The anchor or element representing a playlist link from which to extract nearby title candidates.
+        playlist_id (str | None): Optional playlist identifier used to produce a fallback title when extraction fails.
+    
+    Returns:
+        str | None: The derived playlist title, the fallback "Playlist {playlist_id}", or `None`.
+    """
     if not link:
         return None
     candidates = []
@@ -129,7 +152,12 @@ def derive_playlist_title_from_link(link, playlist_id=None):
 
 
 def fetch_playlist_title_from_page(playlist_id):
-    """Fetch the actual title from the individual playlist page"""
+    """
+    Attempt to retrieve a human-friendly title for the given YouTube playlist by fetching its playlist page.
+    
+    Returns:
+        title (str): The playlist title if found and not the generic "view full playlist" text, `None` otherwise.
+    """
     try:
         url = f"https://www.youtube.com/playlist?list={playlist_id}"
         resp = requests.get(url, headers=HEADERS, timeout=15)
@@ -187,37 +215,93 @@ def fetch_playlist_title_from_page(playlist_id):
 CURRENT_TOKEN_FILE = "token.json"  # Main token file in root directory
 
 def load_state():
+    """
+    Load the saved monitoring state from disk or return defaults if no state file exists.
+    
+    Returns:
+        dict: Monitoring state with keys:
+            - "latest_playlist_link": The last seen playlist URL or `None` if unknown.
+            - "latest_playlist_title": The title of the last seen playlist or `None` if unknown.
+            - "last_checked": ISO timestamp string of the last check or `None` if never checked.
+    """
     if STATE_FILE.exists():
         with open(STATE_FILE) as f:
             return json.load(f)
     return {"latest_playlist_link": None, "latest_playlist_title": None, "last_checked": None}
 
 def save_state(state):
+    """
+    Persist the given state mapping to the configured state file on disk.
+    
+    Ensures the state file's parent directory exists, then writes the provided state as pretty-printed JSON, overwriting any existing file.
+    
+    Parameters:
+        state (dict): The state data to persist.
+    """
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
 def load_scraped_playlists():
+    """
+    Load scraped playlists from disk.
+    
+    Reads JSON from the scraped playlists file and returns its parsed contents; if the file is missing, returns an empty list.
+    
+    Returns:
+        list: The list of scraped playlist objects, or an empty list if the file does not exist.
+    """
     if SCRAPED_PLAYLISTS_FILE.exists():
         with open(SCRAPED_PLAYLISTS_FILE) as f:
             return json.load(f)
     return []
 
 def save_scraped_playlists(playlists):
+    """
+    Persist a list of scraped playlist records to the configured scraped playlists file.
+    
+    Parameters:
+        playlists (list): Sequence of playlist objects (typically dicts with keys like `link`, `playlist_id`, `title`, `discovered_at`) to be written to disk as pretty-printed JSON.
+    """
     with open(SCRAPED_PLAYLISTS_FILE, "w") as f:
         json.dump(playlists, f, indent=2)
 
 def load_synced_playlists():
+    """
+    Load the persisted list of synced playlists from disk.
+    
+    Returns:
+        list: The synced playlists parsed from SYNCED_PLAYLISTS_FILE (as decoded from JSON), or an empty list if the file does not exist.
+    """
     if SYNCED_PLAYLISTS_FILE.exists():
         with open(SYNCED_PLAYLISTS_FILE) as f:
             return json.load(f)
     return []
 
 def save_synced_playlists(playlists):
+    """
+    Write the provided list of synced playlists to the persistent synced playlists file.
+    
+    Parameters:
+        playlists (list): List of playlist dictionaries/objects to serialize and save to disk as JSON.
+    """
     with open(SYNCED_PLAYLISTS_FILE, "w") as f:
         json.dump(playlists, f, indent=2)
 
 def scrape_playlists_with_selenium():
+    """
+    Scrapes playlist metadata from the configured YouTube channel using a Selenium-driven headless Chrome instance.
+    
+    Attempts to load the channel page, handle common consent prompts, expand/lazy-load content, and extract playlist links and IDs. May save the fetched page HTML for inspection when enabled by configuration.
+    
+    Returns:
+        list: A list of playlist dictionaries with keys:
+            - `link` (str): Full playlist URL.
+            - `playlist_id` (str): YouTube playlist ID.
+            - `title` (str): Derived, normalized playlist title.
+            - `discovered_at` (str): ISO 8601 timestamp when the playlist was discovered.
+        Returns an empty list on error or if no playlists are found.
+    """
     try:
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
@@ -517,7 +601,12 @@ def scrape_playlists_with_selenium():
         return []
 
 def scrape_playlists_with_playwright():
-    """Scrape playlists using Playwright as a backup method"""
+    """
+    Scrapes the configured YouTube channel page with Playwright and returns discovered playlists.
+    
+    Returns:
+        list[dict]: A list of playlist objects each containing keys `link`, `playlist_id`, `title`, and `discovered_at`. Returns an empty list if Playwright is unavailable or an error occurs.
+    """
     try:
         from playwright.sync_api import sync_playwright
         import tempfile
@@ -724,6 +813,14 @@ def scrape_playlists_with_playwright():
         return []
 
 def scrape_playlists_with_api():
+    """
+    Scrapes the channel page using HTTP requests and extracts discovered playlists without running a browser.
+    
+    Attempts multiple request URLs and JSON extraction strategies to locate embedded YouTube data and parse playlist entries.
+    
+    Returns:
+        list: A list of playlist dictionaries (each containing keys like 'link', 'playlist_id', 'title', 'discovered_at') if any are found; an empty list if none are found or on failure.
+    """
     try:
         # Import required modules locally to ensure they're available
         import urllib3
@@ -967,7 +1064,18 @@ def scrape_playlists_with_api():
         return []  # Return empty list to indicate failure
 
 def save_page_content_for_inspection(content, filename_suffix=""):
-    """Save page content to a file for inspection"""
+    """
+    Write page HTML content to a timestamped file for offline inspection when enabled.
+    
+    If SAVE_PAGE_CONTENT_FOR_INSPECTION is False this function returns without creating a file.
+    Files are written to the module's data directory with a timestamp and the optional filename_suffix
+    appended to the filename. Errors during file writing are logged.
+    
+    Parameters:
+        content (str): The HTML or text content to write to the file.
+        filename_suffix (str): Optional short string appended to the generated filename to
+            help identify the saved file (defaults to empty string).
+    """
     if not SAVE_PAGE_CONTENT_FOR_INSPECTION:
         return  # Skip saving if the config variable is False
 
@@ -982,6 +1090,21 @@ def save_page_content_for_inspection(content, filename_suffix=""):
         logger.error(f"Error saving page content for inspection: {e}")
 
 def extract_playlists_from_data(data):
+    """
+    Extract playlist entries from a nested YouTube data structure.
+    
+    Scans a JSON-like object (nested dicts/lists) for playlist identifiers and associated title metadata, derives a human-friendly title when possible, and returns a list of playlist records containing the playlist URL, ID, title, and discovery timestamp.
+    
+    Parameters:
+        data: A parsed JSON-like object (typically dict or list) containing YouTube page or ytInitialData structures.
+    
+    Returns:
+        list: A list of playlist dictionaries with keys:
+            - "link" (str): Full playlist URL (https://www.youtube.com/playlist?list={id}).
+            - "playlist_id" (str): The playlist identifier.
+            - "title" (str): Derived or fallback title for the playlist.
+            - "discovered_at" (str): ISO-8601 timestamp when the playlist entry was created.
+    """
     playlists = []
     try:
         if ENABLE_DEBUG_LOGGING:
@@ -989,6 +1112,15 @@ def extract_playlists_from_data(data):
 
         # Recursive search for playlistId in the data
         def find_playlists(obj, depth=0):
+            """
+            Recursively search a nested JSON-like object for YouTube playlist entries and record them in the module-level `playlists` list.
+            
+            Scans dictionaries and lists for playlistRenderer/gridPlaylistRenderer objects or any occurrence of a `playlistId`, extracts a playlist ID and a best-effort human title using multiple fallback locations, avoids deep recursion (stops when `depth > 10`), and appends unique playlist records to the module-level `playlists` list. Each appended record contains `link`, `playlist_id`, `title`, and `discovered_at`. Duplicate playlist IDs are ignored.
+            
+            Parameters:
+                obj: The nested dict/list structure (typically parsed JSON) to search for playlist data.
+                depth (int): Current recursion depth (used internally to prevent excessive recursion).
+            """
             if depth > 10:  # Prevent deep recursion
                 return
             if isinstance(obj, dict):
@@ -1187,7 +1319,15 @@ def extract_playlists_from_data(data):
     return playlists
 
 def is_spam_video_by_title(title):
-    """Check if a video title indicates it's spam based on keywords"""
+    """
+    Determine whether a video title is likely spam based on the presence of common spam-related keywords.
+    
+    Parameters:
+        title (str): The video title to evaluate.
+    
+    Returns:
+        bool: `True` if two or more spam-related keywords are present in the title, `False` otherwise.
+    """
     if not title:
         return False
 
@@ -1205,6 +1345,16 @@ def is_spam_video_by_title(title):
 
 
 def _extract_text_from_title_obj(title_obj):
+    """
+    Extracts a textual title from a potentially complex title object (string or mapping) returned by YouTube page data.
+    
+    Parameters:
+        title_obj (str | dict | None): A string or dictionary that may contain text under keys such as
+            `simpleText`, `runs` (list of {"text": ...}), `text`, `value`, `title`, or `label`.
+    
+    Returns:
+        str: The extracted text, or an empty string if no usable text is found.
+    """
     if not title_obj:
         return ""
     if isinstance(title_obj, str):
@@ -1222,6 +1372,17 @@ def _extract_text_from_title_obj(title_obj):
 
 
 def _collect_playlist_video_entries(obj, entries):
+    """
+    Recursively collects (video_id, title) pairs from nested playlist data structures.
+    
+    Searches through nested dicts and lists for objects containing a "playlistVideoRenderer" entry.
+    When found, extracts the video's `videoId` and a textual title (falling back to `shortBylineText`
+    if the main title is absent) using `_extract_text_from_title_obj`, and appends a `(video_id, title)`
+    tuple to the provided `entries` list. The function mutates `entries` in place.
+    Parameters:
+        obj: The JSON-like object (dict or list) to traverse.
+        entries (list): A list that will be extended with `(video_id, title)` tuples found during traversal.
+    """
     if isinstance(obj, dict):
         renderer = obj.get("playlistVideoRenderer")
         if renderer:
@@ -1238,6 +1399,15 @@ def _collect_playlist_video_entries(obj, entries):
 
 
 def _filter_playlist_video_entries(entries):
+    """
+    Filter a list of (video_id, title) pairs and return a deduplicated list of valid video IDs.
+    
+    Parameters:
+    	entries (Iterable[tuple[str | None, str | None]]): Iterable of (video_id, title) pairs. `video_id` may be None or empty.
+    
+    Returns:
+    	list[str]: A list of unique, non-empty video IDs in the order they were first encountered. Entries with empty IDs, duplicate IDs, or titles that match spam heuristics are excluded. Spam exclusions are logged at INFO level.
+    """
     filtered = []
     seen = set()
     for video_id, title in entries:
@@ -1254,6 +1424,17 @@ def _filter_playlist_video_entries(entries):
 
 
 def extract_video_ids_from_initial_data(text):
+    """
+    Extracts video IDs from embedded ytInitialData JSON blocks found in a page's text.
+    
+    Searches the input text for common ytInitialData assignment patterns, parses any found JSON blobs, and collects playlist video IDs. Ignores JSON blocks that fail to parse and returns the first non-empty filtered list of video IDs.
+    
+    Parameters:
+        text (str): Page HTML or JavaScript text to scan for ytInitialData blocks.
+    
+    Returns:
+        list[str]: A list of extracted video ID strings, or an empty list if none are found.
+    """
     patterns = [
         r'var ytInitialData = ({.*?});',
         r'ytInitialData = ({.*?});',
@@ -1274,6 +1455,17 @@ def extract_video_ids_from_initial_data(text):
     return []
 
 def extract_videos_from_playlist(url):
+    """
+    Extract video IDs from a YouTube playlist page URL.
+    
+    Attempts several extraction strategies (embedded ytInitialData parsing, regex, and HTML attribute parsing) and returns a deduplicated list of video IDs. Titles that match spam heuristics are filtered out when available; in some fallbacks the function will trim trailing items likely to be spam. On network errors or parsing failures it returns an empty list or the best-effort list it could extract.
+    
+    Parameters:
+        url (str): URL of the YouTube playlist page to parse.
+    
+    Returns:
+        list[str]: Ordered list of unique YouTube video IDs (11-character strings). Returns an empty list if no IDs could be extracted.
+    """
     try:
         # Use the global requests module that's imported at the top
         resp = requests.get(url, headers=HEADERS, timeout=15)
@@ -1361,6 +1553,14 @@ def extract_videos_from_playlist(url):
         return []
 
 def get_authenticated_service():
+    """
+    Obtain an authenticated YouTube Data API v3 service using the module's configured OAuth credentials.
+    
+    Attempts to load and refresh credentials from the current token file; if no valid credentials are available, initiates an OAuth authorization flow (web-based local callback if web credentials are present, otherwise an installed-app copy/paste flow). On success the credentials are persisted to the current token file for future runs. This function may start a temporary local HTTP server or prompt for user input and returns None on failure.
+    
+    Returns:
+        service (googleapiclient.discovery.Resource | None): A YouTube Data API v3 service resource when authentication succeeds, or `None` if authentication or service creation failed.
+    """
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow, Flow
@@ -1559,6 +1759,11 @@ def get_authenticated_service():
                 # Create a simple HTTP server to handle the callback
                 class OAuthCallbackHandler(BaseHTTPRequestHandler):
                     def do_GET(self):
+                        """
+                        Handle the OAuth redirect callback: extract the authorization code, exchange it for credentials, send an HTML response to the browser, and store the obtained credentials.
+                        
+                        On successful exchange sets the outer-scope variable `creds` to the obtained credentials and sends a 200 success page. If the callback contains no `code` query parameter, sends a 400 failure page. If an exception occurs during processing, sends a 500 error page and logs the error.
+                        """
                         try:
                             # Parse the authorization code from the callback URL
                             query_params = parse_qs(urlparse(self.path).query)
@@ -1590,6 +1795,13 @@ def get_authenticated_service():
 
                     def log_message(self, format, *args):
                         # Suppress server log messages
+                        """
+                        Disable default server request logging by ignoring the provided format and arguments.
+                        
+                        Parameters:
+                            format (str): Log message format string passed by the server (ignored).
+                            *args: Positional arguments for the format string (ignored).
+                        """
                         pass
 
                 # Start the server in a separate thread
@@ -1705,6 +1917,11 @@ def get_authenticated_service():
         return None
 
 def sync_playlists_to_youtube():
+    """
+    Synchronize locally scraped playlists to YouTube by creating corresponding YouTube playlists and adding their videos.
+    
+    Attempts to authenticate with the YouTube API, then iterates over saved scraped playlists: for each not already synced it creates a new public YouTube playlist, adds the playlist's videos, updates persistent scraped and synced lists, and respects configured delays and daily quota limits. The function consumes quota units when creating playlists and adding videos, skips or stops when daily quota is exhausted, logs success and failures for each playlist and video, and continues processing remaining playlists when individual operations fail.
+    """
     try:
         scraped = load_scraped_playlists()
         synced = load_synced_playlists()
@@ -1840,19 +2057,40 @@ def sync_playlists_to_youtube():
 QUOTA_USAGE_FILE = Path("./data/quota_usage.json")
 
 def load_quota_usage():
-    """Load daily quota usage from file"""
+    """
+    Load persisted daily quota usage from disk.
+    
+    Returns:
+        dict: Mapping with keys:
+            - "date": ISO-formatted date string of the recorded usage or `None` if no record exists.
+            - "used_units": integer count of consumed quota units; defaults to 0 when no file is present.
+        Defaults to {"date": None, "used_units": 0} if the quota usage file does not exist.
+    """
     if QUOTA_USAGE_FILE.exists():
         with open(QUOTA_USAGE_FILE) as f:
             return json.load(f)
     return {"date": None, "used_units": 0}
 
 def save_quota_usage(date, used_units):
-    """Save daily quota usage to file"""
+    """
+    Persist the daily quota usage to the configured quota usage file, overwriting any existing data.
+    
+    Parameters:
+        date (str): Date for the usage entry, typically in "YYYY-MM-DD" format.
+        used_units (int): Total quota units consumed for the given date.
+    """
     with open(QUOTA_USAGE_FILE, "w") as f:
         json.dump({"date": date, "used_units": used_units}, f, indent=2)
 
 def check_daily_quota():
-    """Check if we've exceeded the daily quota (configurable limit)"""
+    """
+    Determine whether the current credential has remaining daily quota and, if exhausted, attempt credential rotation when enabled.
+    
+    When the stored quota date differs from today the daily usage is reset to zero. If the current token's used units are below the configured DAILY_QUOTA_LIMIT the function reports success. If the limit is reached and ROTATE_CREDENTIALS_ON_QUOTA_EXHAUSTION is enabled, the function attempts to switch to an alternate credential set.
+    
+    Returns:
+        True if the current credential has available quota or if credential rotation succeeded, False if the daily quota is exhausted and no rotation occurred.
+    """
     today = datetime.now().strftime("%Y-%m-%d")
     quota_data = load_quota_usage()
 
@@ -1873,7 +2111,14 @@ def check_daily_quota():
     return True
 
 def rotate_credentials_if_available():
-    """Rotate to a different token file if available and quota is not exhausted"""
+    """
+    Selects and activate an alternate credential token file when an alternate has available daily quota.
+    
+    Checks configured credential sets for a different token file that exists and has remaining daily quota (or no recorded quota). When a suitable alternate is found, updates the module-level `CURRENT_TOKEN_FILE` to that token file (and resets its daily quota record if it belongs to a previous day).
+    
+    Returns:
+        True if the active token file was switched to an alternate with available quota, False otherwise.
+    """
     global CURRENT_TOKEN_FILE  # Update the module-level token file variable
 
     # Cycle through available credential sets
@@ -1908,14 +2153,34 @@ def rotate_credentials_if_available():
     return False
 
 def save_alt_quota_usage(quota_file, date, used_units):
-    """Save alternate quota usage to file"""
+    """
+    Persist an alternate quota usage record to the module's data directory.
+    
+    Parameters:
+        quota_file (str): Filename to write under the ./data directory (e.g., "quota_usage_alt.json").
+        date (str): Date associated with the usage (ISO date string, e.g., "YYYY-MM-DD").
+        used_units (int): Number of quota units consumed for that date.
+    
+    Notes:
+        Creates the ./data directory if it does not exist and writes/overwrites
+        ./data/{quota_file} with a JSON object containing the keys "date" and "used_units".
+    """
     # Ensure the data directory exists
     os.makedirs("./data", exist_ok=True)
     with open(f"./data/{quota_file}", "w") as f:
         json.dump({"date": date, "used_units": used_units}, f, indent=2)
 
 def consume_quota(units):
-    """Consume specified number of quota units"""
+    """
+    Update daily quota usage by consuming the specified number of quota units.
+    
+    Parameters:
+        units (int): Number of quota units to deduct from today's usage.
+    
+    Description:
+        Increments and persists the daily quota usage for the active token file and, if a non-default token is in use, for the corresponding alternate quota file (data/quota_usage_{token_base}.json). If the stored date differs from today, the usage counters are reset before applying the consumption. Updates are saved via save_quota_usage and save_alt_quota_usage and an informational log entry is emitted.
+    
+    """
     global CURRENT_TOKEN_FILE  # Access the module-level token file variable
     today = datetime.now().strftime("%Y-%m-%d")
     quota_data = load_quota_usage()
@@ -1948,6 +2213,21 @@ def consume_quota(units):
     logger.info(f"Consumed {units} quota units. Total used today: {quota_data['used_units']}/10000")
 
 def detect_new_playlists():
+    """
+    Checks the configured YouTube channel for newly published playlists and queues matching playlists for later syncing.
+    
+    This function attempts multiple scraping strategies to discover the channel's current playlists, compares the most recent playlist against the saved state, and for any newly discovered playlists it:
+    - fetches an authoritative playlist title from the playlist page,
+    - applies the configured title filter (requires "full album" in the title when FILTER_FOR is set),
+    - extracts the playlist's video IDs,
+    - appends accepted playlists to the persisted scraped playlist queue,
+    - updates persistent state with the latest playlist link, title, and last-checked timestamp.
+    
+    Side effects:
+    - Reads and writes persisted state and scraped-playlist storage files.
+    - Performs network requests to YouTube pages (may use browser automation or HTTP-based scraping).
+    - May leave existing scraped playlists unchanged if detection or extraction fails.
+    """
     logger.info(f"Fetching page from {CHANNEL_URL}")
 
     try:
@@ -2022,6 +2302,11 @@ def detect_new_playlists():
         logger.warning("Could not detect any new playlists this run, but processing existing scraped playlists")
 
 def main():
+    """
+    Run a single automation cycle that detects new playlists and, if enabled, syncs them to YouTube.
+    
+    This function performs playlist detection, loads any scraped playlists awaiting synchronization, and conditionally invokes the sync process when ENABLE_YOUTUBE_API_SYNC is true. It logs progress and outcomes, handles user interruption, and logs unexpected errors with traceback. No value is returned.
+    """
     logger.info("=" * 70)
     logger.info("YouTube Monitor - Automation Run")
     logger.info(f"Timestamp: {datetime.now().isoformat()}")
@@ -2061,6 +2346,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
