@@ -1815,7 +1815,8 @@ def sync_playlists_to_youtube():
                     "original_playlist_id": playlist["playlist_id"],
                     "new_playlist_id": new_id,
                     "synced_at": datetime.now().isoformat(),
-                    "title": playlist["title"]
+                    "title": playlist["title"],
+                    "videos": playlist.get("videos", [])
                 })
 
                 # Remove from scraped list and save both lists
