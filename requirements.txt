@@ -1,0 +1,9 @@
+requests==2.31.0
+beautifulsoup4==4.12.2
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.100.0
+selenium==4.15.0
+python-dotenv==1.2.1
+crawlee==0.6.12
+pydantic<2.0 ; python_version < '3.13'
